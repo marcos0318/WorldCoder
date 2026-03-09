@@ -247,8 +247,15 @@ class RefineTransitAction(_Action):
         exp_result = self.eval_result['exp_result']
         crt_experiences = exp_result['crt_transit_experiences']
         wrong_experiences = exp_result['wrong_transit_experiences']
-        assert len(crt_experiences) > 0, f'len(crt_experiences) == 0'
-        assert len(wrong_experiences) > 0, f'len(wrong_experiences) == 0'
+        if len(crt_experiences) == 0 or len(wrong_experiences) == 0:
+            # Cannot refine without both correct and wrong examples; return current eval (no-op)
+            return dict(
+                self.eval_result,
+                transit_code=self.init_transit_code,
+                reward_code=self.init_reward_code,
+                code=self.init_transit_code,
+                final_outputs={'costs': {}, 'new_costs': {}},
+            )
         if len(crt_experiences) > self.crt_exp_num_per_refine:
             crt_keys = list(sorted(crt_experiences.keys()))
             crt_key_indexes = self.local_np_rng.choice(len(crt_keys), size=self.crt_exp_num_per_refine, replace=False)
@@ -473,7 +480,7 @@ def synthesis(
             exp_success_ratio_list.append(eval_result['exp_result']['success_ratio'])
             best_exp_success_ratio_list.append(max(exp_success_ratio_list))
 
-            if not eval_result['exp_result']['transit_success_flag']:
+            if not eval_result['exp_result']['transit_success_flag'] and len(eval_result['exp_result']['crt_transit_experiences']) > 0:
                 actions.append(RefineTransitAction(
                     len(actions),
                     init_transit_code,

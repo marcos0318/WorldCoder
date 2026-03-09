@@ -1,0 +1,11 @@
+refactor(agent): concurrent-safe planner cache, add_experience split, robust synthesizer
+
+- Agent: add add_experience() to record transitions; learn() calls it and keeps
+  evaluation/update logic. Cleans up commented code.
+- Planner: use atomic INSERT...SELECT for plan_cache idx to avoid races when
+  multiple processes share the same DB; allow _store_cache to overwrite
+  existing files.
+- Synthesizer: when correct or wrong transit experiences are missing, return
+  no-op instead of asserting; only schedule RefineTransitAction when
+  crt_transit_experiences is non-empty.
+- Config: ignore .deepinfra_api_key; bump TatSu 5.12.0 -> 5.13.1.

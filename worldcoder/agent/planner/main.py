@@ -7,7 +7,7 @@ try:
     from sqlalchemy.orm import declarative_base
 except ImportError:
     from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy import Column, Integer, String, create_engine, select, ARRAY, Float
+from sqlalchemy import Column, Integer, String, create_engine, select, ARRAY, Float, text
 from sqlalchemy.orm import Session
 
 # from .bfs import breadth_first_search
@@ -62,30 +62,25 @@ class PlannerWithSuccess:
         # Actual planning
         result = self._action(initial_state, mission, world_model, method=method, budget=budget, max_depth=max_depth, ucb_c=ucb_c)
 
-        # Get max idx in cache
-        stmt = (
-            select(
-                self.cache_schema.idx,
-            ).order_by(self.cache_schema.idx)
-        )
+        # Atomically assign a unique idx and insert (safe for concurrent processes sharing the same DB)
+        stmt = text("""
+            INSERT INTO plan_cache (initial_state, mission, world_model, method, budget, max_depth, ucb_c, idx)
+            SELECT :initial_state, :mission, :world_model, :method, :budget, :max_depth, :ucb_c,
+                   (SELECT COALESCE(MAX(idx), -1) + 1 FROM plan_cache)
+            RETURNING idx
+        """)
         with Session(ENGINE) as session, session.begin():
-            generations = session.execute(stmt).fetchall()
-            generations = [row for row in generations]
-            generations.sort(key=lambda x: x[-1])
-            max_idx = generations[-1][0] if generations else -1
-            assert max_idx == len(generations) - 1, f"max_idx: {max_idx}, generations: {len(generations)}"
-            item = self.cache_schema(
-                initial_state=initial_state_in_str,
-                mission=mission_in_str,
-                world_model=world_model_in_str,
-                method=method,
-                budget=budget,
-                max_depth=max_depth,
-                ucb_c=ucb_c,
-                idx=max_idx+1,
-            )
-            session.add(item)
-        _store_cache(max_idx+1, result)
+            row = session.execute(stmt, {
+                "initial_state": initial_state_in_str,
+                "mission": mission_in_str,
+                "world_model": world_model_in_str,
+                "method": method,
+                "budget": budget,
+                "max_depth": max_depth,
+                "ucb_c": ucb_c,
+            }).fetchone()
+            new_idx = row[0]
+        _store_cache(new_idx, result)
         return result
 
     def _action(
@@ -114,8 +109,9 @@ def _fetch_cache(idx):
     with open(os.path.join(PLAN_CACHE_DIR, f'{idx}.dill'), 'rb') as f:
         return dill.load(f)
 def _store_cache(idx, result):
-    assert not os.path.exists(os.path.join(PLAN_CACHE_DIR, f'{idx}.dill'))
-    with open(os.path.join(PLAN_CACHE_DIR, f'{idx}.dill'), 'wb') as f:
+    path = os.path.join(PLAN_CACHE_DIR, f'{idx}.dill')
+    # Overwrite if exists (e.g. leftover from previous run or rare race); atomic idx above avoids collisions
+    with open(path, 'wb') as f:
         dill.dump(result, f)
 
 planner_with_success = PlannerWithSuccess()

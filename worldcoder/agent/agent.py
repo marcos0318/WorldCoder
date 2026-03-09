@@ -161,23 +161,23 @@ class Agent():
             self.failed_plan_for_current_world_model = False
         return inconsistent, actually_updated
 
+    def add_experience(self, state, mission, action, new_state, reward, done,):
+        """Add one transition to the experience buffer and key sets. Does not run evaluate_and_update."""
+        self.key_missions.add(str(mission))
+        if reward > 0 and done:
+            self.mission_accomplished.add(str(mission))
+        self.experience_buffer[(state, mission, action, new_state, reward, done)] = {
+            'state': state, 'mission': mission, 'action': action,
+            'state_next': new_state, 'reward': reward, 'done': done,
+        }
+
     def learn(self, state, mission, action, new_state, reward, done,):
         """returns True if the world model was updated, False otherwise"""
         # print("learn", state, mission, action, new_state, reward, done, new_state-state)
         print('~'*80)
         print(f"learn at step {self.cur_step}:", mission, action, reward, done, new_state-state)
 
-        self.key_missions.add(str(mission))
-        if reward > 0 and done:
-            self.mission_accomplished.add(str(mission))
-        # if not self.new_data_non_evaluated and (state, mission, action, new_state, reward, done) in self.experience_buffer:
-            # print('already seen this', len(self.experience_buffer))
-            # return False # already learned this
-        self.experience_buffer[(state, mission, action, new_state, reward, done)] = {
-            'state': state, 'mission': mission, 'action': action,
-            'state_next': new_state, 'reward': reward, 'done': done,
-            # 'info': info, 'info_next': info_next
-        }
+        self.add_experience(state, mission, action, new_state, reward, done)
         if len(self.experience_buffer) < self.minimum_buffer_size and self.cur_step < 2 * self.minimum_buffer_size:
             print('not enough data to learn anything', len(self.experience_buffer))
             self.new_data_non_evaluated = True
