@@ -48,8 +48,31 @@ class WorldModel:
             error_message = None
             try:
                 with self.timer('transit'):
-                    new_state = transit_func(copy.deepcopy(old_state), copy.deepcopy(old_action))
-                    new_state = state.from_pyrunnable(new_state).to_pyrunnable(exec_globals)
+                    if hasattr(state, 'observation') and hasattr(state, 'available_actions'):
+                        _transit_state, _transit_action = copy.deepcopy(state), copy.deepcopy(action)
+                    else:
+                        _transit_state = copy.deepcopy(old_state)
+                        _transit_action = copy.deepcopy(old_action)
+                    new_state = transit_func(_transit_state, _transit_action)
+                    # Normalize: transition may return a state object (e.g. TextState) instead of pyrunnable dict
+                    if new_state is not None and not isinstance(new_state, dict):
+                        if hasattr(new_state, 'to_pyrunnable'):
+                            try:
+                                new_state = new_state.to_pyrunnable(exec_globals=exec_globals)
+                            except TypeError:
+                                try:
+                                    new_state = new_state.to_pyrunnable()
+                                except Exception:
+                                    pass
+                            except Exception:
+                                pass
+                        if not isinstance(new_state, dict) and hasattr(new_state, 'observation') and hasattr(new_state, 'available_actions'):
+                            new_state = {
+                                'observation': getattr(new_state, 'observation', ''),
+                                'available_actions': list(getattr(new_state, 'available_actions', [])),
+                            }
+                    if isinstance(new_state, dict):
+                        new_state = state.from_pyrunnable(new_state).to_pyrunnable(exec_globals)
                 with self.timer('reward'):
                     try:
                         new_reward, new_done = reward_func(copy.deepcopy(old_state), copy.deepcopy(old_action), copy.deepcopy(new_state))

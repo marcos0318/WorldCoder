@@ -144,8 +144,19 @@ class TransitEvaluator(_Evaluator):
         action = _exec_globals['action']
         new_state = experience['state_next']
 
-        copied_old_state = copy.deepcopy(old_state)
-        copied_action = copy.deepcopy(action)
+        # Pass state/action as objects when they have text-style API (observation, available_actions),
+        # so LLM-generated transition(state, action) using state.observation works instead of failing
+        # with AttributeError when state is a dict.
+        use_object_api = (
+            hasattr(experience['state'], 'observation')
+            and hasattr(experience['state'], 'available_actions')
+        )
+        if use_object_api:
+            copied_old_state = copy.deepcopy(experience['state'])
+            copied_action = copy.deepcopy(experience['action'])
+        else:
+            copied_old_state = copy.deepcopy(old_state)
+            copied_action = copy.deepcopy(action)
         exec_globals.update({
             'copied_old_state': copied_old_state,
             'copied_action': copied_action,
@@ -161,6 +172,23 @@ class TransitEvaluator(_Evaluator):
         else:
             compilation_error = None
             pred_new_state = exec_globals['pred_new_state']
+            # Normalize: transition may return a state object (e.g. TextState) instead of pyrunnable dict
+            if pred_new_state is not None and not isinstance(pred_new_state, dict):
+                if hasattr(pred_new_state, 'to_pyrunnable'):
+                    try:
+                        pred_new_state = pred_new_state.to_pyrunnable(exec_globals=exec_globals)
+                    except TypeError:
+                        try:
+                            pred_new_state = pred_new_state.to_pyrunnable()
+                        except Exception:
+                            pred_new_state = pred_new_state
+                    except Exception:
+                        pred_new_state = pred_new_state
+                if not isinstance(pred_new_state, dict) and hasattr(pred_new_state, 'observation') and hasattr(pred_new_state, 'available_actions'):
+                    pred_new_state = {
+                        'observation': getattr(pred_new_state, 'observation', ''),
+                        'available_actions': list(getattr(pred_new_state, 'available_actions', [])),
+                    }
             valid_state = new_state.check_valid_pyrunnable(pred_new_state)
             if isinstance(valid_state, str):
                 pred_new_state = None

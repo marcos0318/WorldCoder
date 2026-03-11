@@ -70,8 +70,33 @@ class WorldModel:
                     old_action = action.to_pyrunnable(exec_globals)
                 try:
                     with swallow_io() as s:
-                        new_state = transit_func(copy.deepcopy(old_state), copy.deepcopy(old_action))
-                    new_state = state.from_pyrunnable(new_state).to_pyrunnable(exec_globals)
+                        # Pass state/action as objects when they have text-style API, so transition
+                        # code using state.observation works (LLM often generates this style).
+                        if hasattr(state, 'observation') and hasattr(state, 'available_actions'):
+                            _transit_state, _transit_action = copy.deepcopy(state), copy.deepcopy(action)
+                        else:
+                            _transit_state = copy.deepcopy(old_state)
+                            _transit_action = copy.deepcopy(old_action)
+                        new_state = transit_func(_transit_state, _transit_action)
+                    # Normalize: transition may return a state object (e.g. TextState) instead of pyrunnable dict
+                    if new_state is not None and not isinstance(new_state, dict):
+                        if hasattr(new_state, 'to_pyrunnable'):
+                            try:
+                                new_state = new_state.to_pyrunnable(exec_globals=exec_globals)
+                            except TypeError:
+                                try:
+                                    new_state = new_state.to_pyrunnable()
+                                except Exception:
+                                    pass
+                            except Exception:
+                                pass
+                        if not isinstance(new_state, dict) and hasattr(new_state, 'observation') and hasattr(new_state, 'available_actions'):
+                            new_state = {
+                                'observation': getattr(new_state, 'observation', ''),
+                                'available_actions': list(getattr(new_state, 'available_actions', [])),
+                            }
+                    if isinstance(new_state, dict):
+                        new_state = state.from_pyrunnable(new_state).to_pyrunnable(exec_globals)
                     try:
                         with swallow_io() as s:
                             new_reward, new_done = reward_func(copy.deepcopy(old_state), copy.deepcopy(old_action), copy.deepcopy(new_state))
